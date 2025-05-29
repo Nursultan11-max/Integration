@@ -16,8 +16,8 @@ namespace OneCSqlEtl
         private readonly string _connString;
         private readonly string _progId;
 
-        private dynamic? _v8Application = null;
-        // private dynamic? _activeContext = null; // Убрано, _v8Application будет контекстом
+        private dynamic? _comApplicationInstance = null;
+        private dynamic? _active1CContext = null;
 
         public OneCAccessor(IOptions<Settings> opts, ILogger<OneCAccessor> log)
         {
@@ -44,118 +44,160 @@ namespace OneCSqlEtl
                 _log.LogInformation("COM type for ProgID '{ProgId}' found: {ComTypeName}", _progId, comType.FullName!);
 
 #pragma warning disable CA1416
-                _v8Application = Activator.CreateInstance(comType);
+                _comApplicationInstance = Activator.CreateInstance(comType);
 #pragma warning restore CA1416
 
-                if (_v8Application == null)
+                if (_comApplicationInstance == null)
                 {
                     _log.LogError("Activator.CreateInstance for ProgID '{ProgId}' returned null.", _progId);
                     return false;
                 }
-                _log.LogInformation("Instance of COM object '{ProgId}' created successfully: {_v8ApplicationType}", _progId, _v8Application.GetType().ToString());
+                _log.LogInformation("Instance of COM object '{ProgId}' created successfully: {_comApplicationInstanceType}", _progId, _comApplicationInstance.GetType().ToString());
 
-                if (!Marshal.IsComObject(_v8Application))
+                if (!Marshal.IsComObject(_comApplicationInstance))
                 {
-                    _log.LogError("_v8Application is NOT a COM object. ProgID: {ProgId}. Object Type: {_v8ApplicationType}", _progId, _v8Application.GetType().ToString());
-                    if (_v8Application is IDisposable disp) disp.Dispose();
-                    _v8Application = null;
+                    _log.LogError("_comApplicationInstance is NOT a COM object. ProgID: {ProgId}. Object Type: {_comApplicationInstanceType}", _progId, _comApplicationInstance.GetType().ToString());
+                    if (_comApplicationInstance is IDisposable disp) disp.Dispose();
+                    _comApplicationInstance = null;
                     return false;
                 }
-                _log.LogInformation("_v8Application IS a COM object.");
+                _log.LogInformation("_comApplicationInstance IS a COM object.");
 
-                _log.LogInformation("Attempting to connect to 1C using _v8Application.Connect()...");
-
+                _log.LogInformation("Attempting to connect to 1C using _comApplicationInstance.Connect()...");
+                _active1CContext = null; // Reset active context before attempting connection
                 object? connectResult = null;
                 try
                 {
-                    connectResult = _v8Application.Connect(_connString);
+                    connectResult = _comApplicationInstance.Connect(_connString);
                 }
                 catch (Exception ex)
                 {
-                    _log.LogError(ex, "Exception during _v8Application.Connect(). Cleaning up.");
-                    ReleaseComObjects();
+                    _log.LogError(ex, "Exception during _comApplicationInstance.Connect(). Cleaning up.");
+                    ReleaseComObjects(); // This will release _comApplicationInstance
                     return false;
                 }
 
-                // Проверяем результат Connect()
                 bool isConnectionSuccessful = false;
 
-                if (connectResult is bool boolSuccess) // Сценарий 1: Connect() вернул bool
+                if (connectResult is bool boolSuccess)
                 {
                     if (boolSuccess)
                     {
-                        _log.LogInformation("_v8Application.Connect() returned boolean true. _v8Application is the active context.");
+                        _log.LogInformation("_comApplicationInstance.Connect() returned boolean true. _comApplicationInstance is the active context.");
+                        _active1CContext = _comApplicationInstance;
                         isConnectionSuccessful = true;
                     }
                     else
                     {
-                        _log.LogError("_v8Application.Connect() returned boolean false. Connection failed. ConnString: {ConnStr}", _connString);
+                        _log.LogError("_comApplicationInstance.Connect() returned boolean false. Connection failed. ConnString: {ConnStr}", _connString);
+                        _active1CContext = null;
                     }
                 }
-                else if (connectResult != null && Marshal.IsComObject(connectResult)) // Сценарий 2: Connect() вернул COM-объект (объект соединения)
+                else if (connectResult != null && Marshal.IsComObject(connectResult))
                 {
-                    _log.LogInformation("_v8Application.Connect() returned a COM object (connection object). Type: {ContextType}. _v8Application will be used for NewObject.", connectResult?.GetType().ToString() ?? "null");
-                    // Здесь важно: даже если вернулся объект соединения, для NewObject мы все равно будем использовать _v8Application.
-                    // Сохраненный connectResult (если это объект соединения) мог бы использоваться для явного Disconnect этой сессии, но ReleaseComObjects(_v8Application) должен закрыть все.
+                    _log.LogInformation("_comApplicationInstance.Connect() returned a COM object (connection object). Type: {ContextType}. This connection object will be the active context.", connectResult.GetType().ToString());
+                    _active1CContext = connectResult; // The returned object is the active context
                     isConnectionSuccessful = true;
-                    // Если бы объект соединения был нужен, можно было бы его сохранить:
-                    // _connectionObject = connectResult; 
                 }
-                else if (connectResult == null) // Сценарий 3: Connect() вернул null
+                else if (connectResult == null)
                 {
-                    _log.LogError("_v8Application.Connect() returned null. Connection failed. ConnString: {ConnStr}", _connString);
+                    _log.LogError("_comApplicationInstance.Connect() returned null. Connection failed. ConnString: {ConnStr}", _connString);
+                    _active1CContext = null;
                 }
-                else // Сценарий 4: Connect() вернул что-то неожиданное
+                else
                 {
-                    _log.LogError("_v8Application.Connect() returned an unexpected result. Result Type: {ResultType}", connectResult?.GetType().ToString() ?? "null");
+                    _log.LogError("_comApplicationInstance.Connect() returned an unexpected result. Result Type: {ResultType}", connectResult.GetType().ToString());
+                    _active1CContext = null;
                 }
 
                 if (!isConnectionSuccessful)
                 {
-                    TryLog1CErrorDescription();
-                    ReleaseComObjects();
+                    TryLog1CErrorDescription(); // Uses _comApplicationInstance
+                    ReleaseComObjects(); // Releases _comApplicationInstance and sets _active1CContext to null
                     return false;
                 }
-
-                // Если дошли сюда, соединение успешно, и _v8Application готов к использованию для NewObject()
+                
+                _log.LogInformation("1C Connection successful. Active context type: {_active1CContextType}", _active1CContext?.GetType().ToString() ?? "null");
                 return true;
             }
             catch (Exception ex)
             {
                 _log.LogError(ex, "Critical error during 1C COM initialization or connection. Ensure 1C Client is installed and COM component ({ProgId}) is registered correctly.", _progId);
-                ReleaseComObjects();
+                ReleaseComObjects(); // Releases _comApplicationInstance and sets _active1CContext to null
                 return false;
             }
         }
 
         private void TryLog1CErrorDescription()
         {
-            if (_v8Application != null && Marshal.IsComObject(_v8Application))
+            if (_comApplicationInstance != null && Marshal.IsComObject(_comApplicationInstance))
             {
                 try
                 {
-                    _log.LogInformation("Attempting to get 1C error description (specific method depends on 1C version)...");
+                    // Attempt to get error description from the COM instance.
+                    // This might need adjustment based on specific 1C error handling,
+                    // as error info might be on _active1CContext if it was successfully established.
+                    // For now, using _comApplicationInstance as it's the entry point.
+                    var errorDescription = _comApplicationInstance.ErrorDescription(); // Example, actual method may vary
+                    if (!string.IsNullOrEmpty(errorDescription))
+                    {
+                        _log.LogWarning("1C Error Description from _comApplicationInstance: {ErrorDesc}", errorDescription);
+                    }
+                    else
+                    {
+                        _log.LogInformation("No 1C error description available from _comApplicationInstance or method not standard.");
+                    }
                 }
                 catch (Exception descEx)
                 {
-                    _log.LogWarning(descEx, "Could not retrieve/log 1C error description from _v8Application.");
+                    _log.LogWarning(descEx, "Could not retrieve/log 1C error description from _comApplicationInstance.");
                 }
+            }
+            else
+            {
+                _log.LogInformation("No _comApplicationInstance available to get 1C error description.");
             }
         }
 
         private void ReleaseComObjects()
         {
             _log.LogDebug("Attempting to release COM objects...");
+            dynamic? contextToRelease = _active1CContext;
+            dynamic? instanceToRelease = _comApplicationInstance;
 
-            if (_v8Application != null)
+            _active1CContext = null; // Null out early
+            _comApplicationInstance = null; // Null out early
+
+            if (contextToRelease != null)
             {
-                if (Marshal.IsComObject(_v8Application))
+                if (Marshal.IsComObject(contextToRelease))
                 {
-                    _log.LogDebug("Releasing _v8Application COM object (Type: {_v8ApplicationType})...", (object)_v8Application.GetType().ToString());
-                    try { Marshal.ReleaseComObject(_v8Application); }
-                    catch (Exception ex) { _log.LogWarning(ex, "Exception during _v8Application release."); }
+                    _log.LogDebug("Releasing _active1CContext COM object (Type: {ContextType})...", contextToRelease.GetType().ToString());
+                    try { Marshal.ReleaseComObject(contextToRelease); }
+                    catch (Exception ex) { _log.LogWarning(ex, "Exception during _active1CContext release."); }
                 }
-                _v8Application = null;
+            }
+
+            if (instanceToRelease != null)
+            {
+                // Only release _comApplicationInstance if it's a different object than _active1CContext
+                // or if _active1CContext was null (in which case contextToRelease is null)
+                bool shouldReleaseInstance = !object.ReferenceEquals(instanceToRelease, contextToRelease);
+                if (contextToRelease == null) // If active context was null, instance should always be released if it exists
+                {
+                    shouldReleaseInstance = true;
+                }
+
+                if (shouldReleaseInstance && Marshal.IsComObject(instanceToRelease))
+                {
+                    _log.LogDebug("Releasing _comApplicationInstance COM object (Type: {InstanceType})...", instanceToRelease.GetType().ToString());
+                    try { Marshal.ReleaseComObject(instanceToRelease); }
+                    catch (Exception ex) { _log.LogWarning(ex, "Exception during _comApplicationInstance release."); }
+                }
+                else if (Marshal.IsComObject(instanceToRelease)) // Log if it was the same object and already handled
+                {
+                    _log.LogDebug("_comApplicationInstance was same as _active1CContext, release handled by context release.");
+                }
             }
             _log.LogDebug("Finished releasing COM objects.");
         }
@@ -169,9 +211,9 @@ namespace OneCSqlEtl
 
         private IEnumerable<Customer1C> GetCustomersInternal(string query)
         {
-            if (_v8Application == null)
+            if (_active1CContext == null)
             {
-                _log.LogError("1C Application object (_v8Application) не инициализирован для GetCustomersInternal.");
+                _log.LogError("1C Active Context (_active1CContext) не инициализирован для GetCustomersInternal.");
                 yield break;
             }
 
@@ -182,11 +224,11 @@ namespace OneCSqlEtl
 
             try
             {
-                _log.LogDebug("Creating Query object for Customers using _v8Application (Type: {_v8AppType})", (object)_v8Application.GetType().ToString());
-                q = _v8Application.NewObject("Query");
+                _log.LogDebug("Creating Query object for Customers using _active1CContext (Type: {_active1CContextType})", _active1CContext.GetType().ToString());
+                q = _active1CContext.NewObject("Query");
                 if (q == null)
                 {
-                    _log.LogError("Не удалось создать объект Query для Контрагентов (_v8Application.NewObject вернул null).");
+                    _log.LogError("Не удалось создать объект Query для Контрагентов (_active1CContext.NewObject вернул null).");
                     yield break;
                 }
 
@@ -287,9 +329,9 @@ namespace OneCSqlEtl
 
         private IEnumerable<Product1C> GetProductsInternal(string query)
         {
-            if (_v8Application == null)
+            if (_active1CContext == null)
             {
-                _log.LogError("1C Application object (_v8Application) не инициализирован для GetProductsInternal.");
+                _log.LogError("1C Active Context (_active1CContext) не инициализирован для GetProductsInternal.");
                 yield break;
             }
             dynamic? q = null;
@@ -298,8 +340,9 @@ namespace OneCSqlEtl
             var products = new List<Product1C>();
             try
             {
-                q = _v8Application.NewObject("Query");
-                if (q == null) { _log.LogError("Не удалось создать объект Query для Номенклатуры."); yield break; }
+                _log.LogDebug("Creating Query object for Products using _active1CContext (Type: {_active1CContextType})", _active1CContext.GetType().ToString());
+                q = _active1CContext.NewObject("Query");
+                if (q == null) { _log.LogError("Не удалось создать объект Query для Номенклатуры (_active1CContext.NewObject вернул null)."); yield break; }
                 try { q.Text = query; } catch (COMException ex) { _log.LogError(ex, "COMException текст запроса Номенклатуры."); yield break; } catch (Exception ex) { _log.LogError(ex, "Ошибка текст запроса Номенклатуры."); yield break; }
                 try { executionResult = q.Execute(); } catch (COMException ex) { _log.LogError(ex, "COMException запрос Номенклатуры."); yield break; } catch (Exception ex) { _log.LogError(ex, "Ошибка запрос Номенклатуры."); yield break; }
                 if (executionResult == null) { _log.LogWarning("Query.Execute null для Номенклатуры."); yield break; }
@@ -338,15 +381,16 @@ namespace OneCSqlEtl
 
         private IEnumerable<Contract1C> GetContractsInternal(string query)
         {
-            if (_v8Application == null) { _log.LogError("1C Application object (_v8Application) не инициализирован для GetContractsInternal."); yield break; }
+            if (_active1CContext == null) { _log.LogError("1C Active Context (_active1CContext) не инициализирован для GetContractsInternal."); yield break; }
             dynamic? q = null;
             dynamic? executionResult = null;
             dynamic? table = null;
             var contracts = new List<Contract1C>();
             try
             {
-                q = _v8Application.NewObject("Query");
-                if (q == null) { _log.LogError("Не удалось создать объект Query для Договоров."); yield break; }
+                _log.LogDebug("Creating Query object for Contracts using _active1CContext (Type: {_active1CContextType})", _active1CContext.GetType().ToString());
+                q = _active1CContext.NewObject("Query");
+                if (q == null) { _log.LogError("Не удалось создать объект Query для Договоров (_active1CContext.NewObject вернул null)."); yield break; }
                 try { q.Text = query; } catch (COMException ex) { _log.LogError(ex, "COMException текст запроса Договоров."); yield break; } catch (Exception ex) { _log.LogError(ex, "Ошибка текст запроса Договоров."); yield break; }
                 try { executionResult = q.Execute(); } catch (COMException ex) { _log.LogError(ex, "COMException запрос Договоров."); yield break; } catch (Exception ex) { _log.LogError(ex, "Ошибка запрос Договоров."); yield break; }
                 if (executionResult == null) { _log.LogWarning("Query.Execute null для Договоров."); yield break; }
@@ -384,15 +428,16 @@ namespace OneCSqlEtl
 
         private IEnumerable<Organization1C> GetOrganizationsInternal(string query)
         {
-            if (_v8Application == null) { _log.LogError("1C Application object (_v8Application) не инициализирован для GetOrganizationsInternal."); yield break; }
+            if (_active1CContext == null) { _log.LogError("1C Active Context (_active1CContext) не инициализирован для GetOrganizationsInternal."); yield break; }
             dynamic? q = null;
             dynamic? executionResult = null;
             dynamic? table = null;
             var organizations = new List<Organization1C>();
             try
             {
-                q = _v8Application.NewObject("Query");
-                if (q == null) { _log.LogError("Не удалось создать объект Query для Организаций."); yield break; }
+                _log.LogDebug("Creating Query object for Organizations using _active1CContext (Type: {_active1CContextType})", _active1CContext.GetType().ToString());
+                q = _active1CContext.NewObject("Query");
+                if (q == null) { _log.LogError("Не удалось создать объект Query для Организаций (_active1CContext.NewObject вернул null)."); yield break; }
                 try { q.Text = query; } catch (COMException ex) { _log.LogError(ex, "COMException текст запроса Организаций."); yield break; } catch (Exception ex) { _log.LogError(ex, "Ошибка текст запроса Организаций."); yield break; }
                 try { executionResult = q.Execute(); } catch (COMException ex) { _log.LogError(ex, "COMException запрос Организаций."); yield break; } catch (Exception ex) { _log.LogError(ex, "Ошибка запрос Организаций."); yield break; }
                 if (executionResult == null) { _log.LogWarning("Query.Execute null для Организаций."); yield break; }
@@ -426,15 +471,16 @@ namespace OneCSqlEtl
 
         private IEnumerable<SaleFactData> GetSaleRowsInternal(string query)
         {
-            if (_v8Application == null) { _log.LogError("1C Application object (_v8Application) не инициализирован для GetSaleRowsInternal."); yield break; }
+            if (_active1CContext == null) { _log.LogError("1C Active Context (_active1CContext) не инициализирован для GetSaleRowsInternal."); yield break; }
             dynamic? q = null;
             dynamic? executionResult = null;
             dynamic? table = null;
             var saleRows = new List<SaleFactData>();
             try
             {
-                q = _v8Application.NewObject("Query");
-                if (q == null) { _log.LogError("Не удалось создать объект Query для Строк Продаж."); yield break; }
+                _log.LogDebug("Creating Query object for SaleRows using _active1CContext (Type: {_active1CContextType})", _active1CContext.GetType().ToString());
+                q = _active1CContext.NewObject("Query");
+                if (q == null) { _log.LogError("Не удалось создать объект Query для Строк Продаж (_active1CContext.NewObject вернул null)."); yield break; }
                 try { q.Text = query; } catch (COMException ex) { _log.LogError(ex, "COMException текст запроса Строк Продаж."); yield break; } catch (Exception ex) { _log.LogError(ex, "Ошибка текст запроса Строк Продаж."); yield break; }
                 try { executionResult = q.Execute(); } catch (COMException ex) { _log.LogError(ex, "COMException запрос Строк Продаж."); yield break; } catch (Exception ex) { _log.LogError(ex, "Ошибка запрос Строк Продаж."); yield break; }
                 if (executionResult == null) { _log.LogWarning("Query.Execute null для Строк Продаж."); yield break; }
@@ -497,15 +543,16 @@ namespace OneCSqlEtl
 
         private IEnumerable<PaymentRowData> GetPaymentRowsInternal(string query)
         {
-            if (_v8Application == null) { _log.LogError("1C Application object (_v8Application) не инициализирован для GetPaymentRowsInternal."); yield break; }
+            if (_active1CContext == null) { _log.LogError("1C Active Context (_active1CContext) не инициализирован для GetPaymentRowsInternal."); yield break; }
             dynamic? q = null;
             dynamic? executionResult = null;
             dynamic? table = null;
             var paymentRows = new List<PaymentRowData>();
             try
             {
-                q = _v8Application.NewObject("Query");
-                if (q == null) { _log.LogError("Не удалось создать объект Query для Строк Платежей."); yield break; }
+                _log.LogDebug("Creating Query object for PaymentRows using _active1CContext (Type: {_active1CContextType})", _active1CContext.GetType().ToString());
+                q = _active1CContext.NewObject("Query");
+                if (q == null) { _log.LogError("Не удалось создать объект Query для Строк Платежей (_active1CContext.NewObject вернул null)."); yield break; }
                 try { q.Text = query; } catch (COMException ex) { _log.LogError(ex, "COMException текст запроса Строк Платежей."); yield break; } catch (Exception ex) { _log.LogError(ex, "Ошибка текст запроса Строк Платежей."); yield break; }
                 try { executionResult = q.Execute(); } catch (COMException ex) { _log.LogError(ex, "COMException запрос Строк Платежей."); yield break; } catch (Exception ex) { _log.LogError(ex, "Ошибка запрос Строк Платежей."); yield break; }
                 if (executionResult == null) { _log.LogWarning("Query.Execute null для Строк Платежей."); yield break; }
