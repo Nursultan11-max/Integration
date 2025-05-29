@@ -32,16 +32,16 @@ namespace OneCSqlEtl
 
         public bool Connect()
         {
-            _log.LogInformation("Attempting OneCAccessor.Connect() with ProgID: {ProgId} and ConnString: {ConnString}", (object)_progId, (object)_connString);
+            _log.LogInformation("Attempting OneCAccessor.Connect() with ProgID: {ProgId} and ConnString: {ConnString}", _progId, _connString);
             try
             {
                 Type? comType = Type.GetTypeFromProgID(_progId, throwOnError: false);
                 if (comType == null)
                 {
-                    _log.LogError("COM type for ProgID '{ProgId}' not found.", (object)_progId);
+                    _log.LogError("COM type for ProgID '{ProgId}' not found.", _progId);
                     return false;
                 }
-                _log.LogInformation("COM type for ProgID '{ProgId}' found: {ComTypeName}", (object)_progId, (object)comType.FullName!);
+                _log.LogInformation("COM type for ProgID '{ProgId}' found: {ComTypeName}", _progId, comType.FullName!);
 
 #pragma warning disable CA1416
                 _v8Application = Activator.CreateInstance(comType);
@@ -49,14 +49,14 @@ namespace OneCSqlEtl
 
                 if (_v8Application == null)
                 {
-                    _log.LogError("Activator.CreateInstance for ProgID '{ProgId}' returned null.", (object)_progId);
+                    _log.LogError("Activator.CreateInstance for ProgID '{ProgId}' returned null.", _progId);
                     return false;
                 }
-                _log.LogInformation("Instance of COM object '{ProgId}' created successfully: {_v8ApplicationType}", (object)_progId, (object)_v8Application.GetType().ToString());
+                _log.LogInformation("Instance of COM object '{ProgId}' created successfully: {_v8ApplicationType}", _progId, _v8Application.GetType().ToString());
 
                 if (!Marshal.IsComObject(_v8Application))
                 {
-                    _log.LogError("_v8Application is NOT a COM object. ProgID: {ProgId}. Object Type: {_v8ApplicationType}", (object)_progId, (object)_v8Application.GetType().ToString());
+                    _log.LogError("_v8Application is NOT a COM object. ProgID: {ProgId}. Object Type: {_v8ApplicationType}", _progId, _v8Application.GetType().ToString());
                     if (_v8Application is IDisposable disp) disp.Dispose();
                     _v8Application = null;
                     return false;
@@ -89,12 +89,12 @@ namespace OneCSqlEtl
                     }
                     else
                     {
-                        _log.LogError("_v8Application.Connect() returned boolean false. Connection failed. ConnString: {ConnStr}", (object)_connString);
+                        _log.LogError("_v8Application.Connect() returned boolean false. Connection failed. ConnString: {ConnStr}", _connString);
                     }
                 }
                 else if (connectResult != null && Marshal.IsComObject(connectResult)) // Сценарий 2: Connect() вернул COM-объект (объект соединения)
                 {
-                    _log.LogInformation("_v8Application.Connect() returned a COM object (connection object). Type: {ContextType}. _v8Application will be used for NewObject.", (object)(connectResult?.GetType().ToString() ?? "null"));
+                    _log.LogInformation("_v8Application.Connect() returned a COM object (connection object). Type: {ContextType}. _v8Application will be used for NewObject.", connectResult?.GetType().ToString() ?? "null");
                     // Здесь важно: даже если вернулся объект соединения, для NewObject мы все равно будем использовать _v8Application.
                     // Сохраненный connectResult (если это объект соединения) мог бы использоваться для явного Disconnect этой сессии, но ReleaseComObjects(_v8Application) должен закрыть все.
                     isConnectionSuccessful = true;
@@ -103,11 +103,11 @@ namespace OneCSqlEtl
                 }
                 else if (connectResult == null) // Сценарий 3: Connect() вернул null
                 {
-                    _log.LogError("_v8Application.Connect() returned null. Connection failed. ConnString: {ConnStr}", (object)_connString);
+                    _log.LogError("_v8Application.Connect() returned null. Connection failed. ConnString: {ConnStr}", _connString);
                 }
                 else // Сценарий 4: Connect() вернул что-то неожиданное
                 {
-                    _log.LogError("_v8Application.Connect() returned an unexpected result. Result Type: {ResultType}", (object)(connectResult?.GetType().ToString() ?? "null"));
+                    _log.LogError("_v8Application.Connect() returned an unexpected result. Result Type: {ResultType}", connectResult?.GetType().ToString() ?? "null");
                 }
 
                 if (!isConnectionSuccessful)
@@ -122,7 +122,7 @@ namespace OneCSqlEtl
             }
             catch (Exception ex)
             {
-                _log.LogError(ex, "Critical error during 1C COM initialization or connection. Ensure 1C Client is installed and COM component ({ProgId}) is registered correctly.", (object)_progId);
+                _log.LogError(ex, "Critical error during 1C COM initialization or connection. Ensure 1C Client is installed and COM component ({ProgId}) is registered correctly.", _progId);
                 ReleaseComObjects();
                 return false;
             }

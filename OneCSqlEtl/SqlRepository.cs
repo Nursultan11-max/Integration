@@ -17,12 +17,13 @@ namespace OneCSqlEtl
     {
         private readonly string _connString;
         private readonly ILogger<SqlRepository> _log;
-        private readonly int _commandTimeout = 60; // Таймаут команд в секундах
+        private readonly int _configuredCommandTimeout;
 
         public SqlRepository(IOptions<Settings> opts, ILogger<SqlRepository> log)
         {
             _log = log;
             _connString = opts.Value.ConnectionStrings.SqlServerConnectionString;
+            _configuredCommandTimeout = opts.Value.EtlSettings.SqlCommandTimeout > 0 ? opts.Value.EtlSettings.SqlCommandTimeout : 60; // Use configured timeout, default to 60 if invalid
         }
 
         public async Task<int> GetOrCreateCustomerSKAsync(Customer1C data)
@@ -37,7 +38,7 @@ namespace OneCSqlEtl
             {
                 await conn.OpenAsync();
                 await using var cmd = conn.CreateCommand();
-                cmd.CommandTimeout = _commandTimeout;
+                cmd.CommandTimeout = _configuredCommandTimeout;
                 cmd.CommandText = @"
 SET NOCOUNT ON;
 DECLARE @sk INT;
@@ -85,7 +86,7 @@ SELECT @sk;";
             {
                 await conn.OpenAsync();
                 await using var cmd = conn.CreateCommand();
-                cmd.CommandTimeout = _commandTimeout;
+                cmd.CommandTimeout = _configuredCommandTimeout;
                 cmd.CommandText = @"
 SET NOCOUNT ON;
 DECLARE @sk INT;
@@ -134,7 +135,7 @@ SELECT @sk;";
             {
                 await conn.OpenAsync();
                 await using var cmd = conn.CreateCommand();
-                cmd.CommandTimeout = _commandTimeout;
+                cmd.CommandTimeout = _configuredCommandTimeout;
                 cmd.CommandText = @"
 SET NOCOUNT ON;
 DECLARE @sk INT;
@@ -184,7 +185,7 @@ SELECT @sk;";
             {
                 await conn.OpenAsync();
                 await using var cmd = conn.CreateCommand();
-                cmd.CommandTimeout = _commandTimeout;
+                cmd.CommandTimeout = _configuredCommandTimeout;
                 cmd.CommandText = @"
 SET NOCOUNT ON;
 DECLARE @sk INT;
@@ -242,7 +243,7 @@ SELECT @sk;";
                 bool isWeekend = date.DayOfWeek == DayOfWeek.Saturday || date.DayOfWeek == DayOfWeek.Sunday;
 
                 await using var cmd = conn.CreateCommand();
-                cmd.CommandTimeout = _commandTimeout;
+                cmd.CommandTimeout = _configuredCommandTimeout;
                 // Используем Analytics.DimDates (с 's')
                 cmd.CommandText = @"
 SET NOCOUNT ON;
@@ -333,7 +334,7 @@ SELECT @DateKey;";
                 using (var bulkCopy = new SqlBulkCopy(conn))
                 {
                     bulkCopy.DestinationTableName = "Analytics.FactSales";
-                    bulkCopy.BulkCopyTimeout = _commandTimeout;
+                    bulkCopy.BulkCopyTimeout = _configuredCommandTimeout;
 
                     // Настраиваем соответствие колонок
                     bulkCopy.ColumnMappings.Add("SalesDocumentID_1C", "SalesDocumentID_1C");
@@ -403,7 +404,7 @@ SELECT @DateKey;";
                 using (var bulkCopy = new SqlBulkCopy(conn))
                 {
                     bulkCopy.DestinationTableName = "Analytics.FactPayments";
-                    bulkCopy.BulkCopyTimeout = _commandTimeout;
+                    bulkCopy.BulkCopyTimeout = _configuredCommandTimeout;
 
                     // Настраиваем соответствие колонок
                     bulkCopy.ColumnMappings.Add("PaymentDocID_1C", "PaymentDocID_1C");

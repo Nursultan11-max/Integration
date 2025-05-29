@@ -35,7 +35,7 @@ namespace OneCSqlEtl
             _batchSize = opts.Value.EtlSettings.BatchSize;
             if (_batchSize <= 0)
             {
-                _log.LogWarning("Некорректный размер батча: {BatchSizeValue}. Установлено значение по умолчанию: 500", _batchSize); // Исправлен placeholder
+                _log.LogWarning("Некорректный размер батча: {BatchSize}. Установлено значение по умолчанию: 500", _batchSize);
                 _batchSize = 500;
             }
         }
