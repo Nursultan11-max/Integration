@@ -1,4 +1,5 @@
 ﻿// SqlRepository.cs
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -7,23 +8,40 @@ using Microsoft.Data.SqlClient;
 using System.Data;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using System.Linq; // Added for .Any()
+
+// DTOs (Customer1C, Product1C, etc.) and the main Settings class (with ConnectionStrings and EtlSettings properties)
+// are defined in Models.cs and Settings.cs respectively.
+// No need to redefine them here.
 
 namespace OneCSqlEtl
 {
-    /// <summary>
-    /// Репозиторий для измерений (Dim*) и фактов (Fact*) в SQL Server.
-    /// </summary>
     public class SqlRepository
     {
         private readonly string _connString;
         private readonly ILogger<SqlRepository> _log;
-        private readonly int _commandTimeout = 60; // Таймаут команд в секундах
+        private readonly int _commandTimeout; // Will be read from settings
 
+        // The 'Settings' type here will correctly resolve to the one defined in Settings.cs
         public SqlRepository(IOptions<Settings> opts, ILogger<SqlRepository> log)
         {
-            _log = log;
-            _connString = opts.Value.ConnectionStrings.SqlServerConnectionString;
+            _log = log ?? throw new ArgumentNullException(nameof(log));
+
+            var settingsValue = opts?.Value ?? throw new ArgumentNullException(nameof(opts), "Settings (IOptions<Settings>.Value) is null.");
+
+            _connString = settingsValue.ConnectionStrings?.SqlServerConnectionString
+                ?? throw new ArgumentNullException(nameof(settingsValue.ConnectionStrings.SqlServerConnectionString), "Settings.ConnectionStrings.SqlServerConnectionString is null or missing.");
+
+            _commandTimeout = settingsValue.EtlSettings?.SqlCommandTimeout ?? 60; // Default to 60 if not found or EtlSettings is null
+            if (_commandTimeout <= 0)
+            {
+                _log.LogWarning("Invalid SqlCommandTimeout in settings: {ConfiguredTimeout}. Using default 60 seconds.", _commandTimeout);
+                _commandTimeout = 60;
+            }
         }
+
+        // The DTO types (Customer1C, Product1C, etc.) used as parameters
+        // will correctly resolve to those defined in Models.cs
 
         public async Task<int> GetOrCreateCustomerSKAsync(Customer1C data)
         {
@@ -63,6 +81,11 @@ SELECT @sk;";
                 cmd.Parameters.AddWithValue("@IsActive", !data.IsDeleted);
 
                 var res = await cmd.ExecuteScalarAsync();
+                if (res == null || res == DBNull.Value)
+                {
+                    _log.LogError("Failed to get or create CustomerSK for {CustomerName} (Ref: {CustomerRef}). ExecuteScalarAsync returned null/DBNull.", data.Name, data.Ref);
+                    throw new InvalidOperationException($"Could not retrieve or create CustomerSK for Customer Ref {data.Ref}.");
+                }
                 return Convert.ToInt32(res);
             }
             catch (Exception ex)
@@ -112,6 +135,11 @@ SELECT @sk;";
                 cmd.Parameters.AddWithValue("@DefaultVATRateName", (object?)data.DefaultVATRateName ?? DBNull.Value);
 
                 var res = await cmd.ExecuteScalarAsync();
+                if (res == null || res == DBNull.Value)
+                {
+                    _log.LogError("Failed to get or create ProductSK for {ProductName} (Ref: {ProductRef}). ExecuteScalarAsync returned null/DBNull.", data.Name, data.Ref);
+                    throw new InvalidOperationException($"Could not retrieve or create ProductSK for Product Ref {data.Ref}.");
+                }
                 return Convert.ToInt32(res);
             }
             catch (Exception ex)
@@ -156,6 +184,11 @@ SELECT @sk;";
                 cmd.Parameters.AddWithValue("@OrganizationFullName", (object?)data.OrganizationFullName ?? DBNull.Value);
 
                 var res = await cmd.ExecuteScalarAsync();
+                if (res == null || res == DBNull.Value)
+                {
+                    _log.LogError("Failed to get or create OrganizationSK for {OrganizationName} (Ref: {OrganizationRef}). ExecuteScalarAsync returned null/DBNull.", data.Name, data.Ref);
+                    throw new InvalidOperationException($"Could not retrieve or create OrganizationSK for Organization Ref {data.Ref}.");
+                }
                 return Convert.ToInt32(res);
             }
             catch (Exception ex)
@@ -175,8 +208,8 @@ SELECT @sk;";
 
             if (data.CustomerSK == 0)
             {
-                _log.LogError("CustomerSK is 0 for Contract Ref1C {ContractRef}", data.Ref);
-                throw new ArgumentException("CustomerSK must be set in Contract1C data before calling GetOrCreateContractSKAsync.", nameof(data));
+                _log.LogError("CustomerSK is 0 (uninitialized) for Contract Ref1C {ContractRef} before calling GetOrCreateContractSKAsync.", data.Ref);
+                throw new ArgumentException("CustomerSK must be set to a valid SK in Contract1C data before calling GetOrCreateContractSKAsync.", nameof(data));
             }
 
             await using var conn = new SqlConnection(_connString);
@@ -208,6 +241,11 @@ SELECT @sk;";
                 cmd.Parameters.AddWithValue("@EndDate", data.EndDate.HasValue ? (object)data.EndDate.Value : DBNull.Value);
 
                 var res = await cmd.ExecuteScalarAsync();
+                if (res == null || res == DBNull.Value)
+                {
+                    _log.LogError("Failed to get or create ContractSK for {ContractName} (Ref: {ContractRef}). ExecuteScalarAsync returned null/DBNull.", data.Name, data.Ref);
+                    throw new InvalidOperationException($"Could not retrieve or create ContractSK for Contract Ref {data.Ref}.");
+                }
                 return Convert.ToInt32(res);
             }
             catch (Exception ex)
@@ -220,17 +258,14 @@ SELECT @sk;";
 
         public async Task<int> GetOrCreateDateKeyAsync(DateTime date)
         {
+            int dateKey = int.Parse(date.ToString("yyyyMMdd", CultureInfo.InvariantCulture));
+
             await using var conn = new SqlConnection(_connString);
             try
             {
                 await conn.OpenAsync();
-
-                int dateKey = int.Parse(date.ToString("yyyyMMdd"));
-
                 int dayOfWeekNumber = ((int)date.DayOfWeek == 0) ? 7 : (int)date.DayOfWeek;
-
                 CultureInfo ci = new CultureInfo("ru-RU");
-
                 string dayName = ci.DateTimeFormat.GetDayName(date.DayOfWeek);
                 int dayOfMonth = date.Day;
                 int dayOfYear = date.DayOfYear;
@@ -243,7 +278,6 @@ SELECT @sk;";
 
                 await using var cmd = conn.CreateCommand();
                 cmd.CommandTimeout = _commandTimeout;
-                // Используем Analytics.DimDates (с 's')
                 cmd.CommandText = @"
 SET NOCOUNT ON;
 IF NOT EXISTS (SELECT 1 FROM Analytics.DimDates WHERE DateKey = @DateKey)
@@ -252,9 +286,7 @@ BEGIN
     (DateKey, FullDate, DayOfWeekNumber, DayName, DayOfMonth, DayOfYear, WeekOfYearISO, MonthNumber, MonthName, QuarterNumber, YearNumber, IsWeekend)
   VALUES
     (@DateKey, @FullDate, @DayOfWeekNumber, @DayName, @DayOfMonth, @DayOfYear, @WeekOfYearISO, @MonthNumber, @MonthName, @QuarterNumber, @YearNumber, @IsWeekend);
-END;
-SELECT @DateKey;";
-
+END;"; // No SELECT @DateKey needed here
                 cmd.Parameters.AddWithValue("@DateKey", dateKey);
                 cmd.Parameters.AddWithValue("@FullDate", date.Date);
                 cmd.Parameters.AddWithValue("@DayOfWeekNumber", dayOfWeekNumber);
@@ -268,8 +300,8 @@ SELECT @DateKey;";
                 cmd.Parameters.AddWithValue("@YearNumber", yearNumber);
                 cmd.Parameters.AddWithValue("@IsWeekend", isWeekend);
 
-                var res = await cmd.ExecuteScalarAsync();
-                return Convert.ToInt32(res);
+                await cmd.ExecuteNonQueryAsync();
+                return dateKey;
             }
             catch (Exception ex)
             {
@@ -285,12 +317,17 @@ SELECT @DateKey;";
                 throw new ArgumentNullException(nameof(rows), "Коллекция строк продаж не может быть null");
             }
 
+            if (!rows.Any())
+            {
+                _log.LogInformation("InsertFactSalesAsync: No rows to insert.");
+                return;
+            }
+
             await using var conn = new SqlConnection(_connString);
             try
             {
                 await conn.OpenAsync();
 
-                // Создаем таблицу для пакетной вставки
                 var table = new DataTable();
                 table.Columns.Add("SalesDocumentID_1C", typeof(Guid));
                 table.Columns.Add("SalesDocumentNumber_1C", typeof(string));
@@ -329,13 +366,11 @@ SELECT @DateKey;";
                     table.Rows.Add(dataRow);
                 }
 
-                // Используем SqlBulkCopy для пакетной вставки
                 using (var bulkCopy = new SqlBulkCopy(conn))
                 {
                     bulkCopy.DestinationTableName = "Analytics.FactSales";
-                    bulkCopy.BulkCopyTimeout = _commandTimeout;
+                    bulkCopy.BulkCopyTimeout = _commandTimeout; // Use the configured timeout
 
-                    // Настраиваем соответствие колонок
                     bulkCopy.ColumnMappings.Add("SalesDocumentID_1C", "SalesDocumentID_1C");
                     bulkCopy.ColumnMappings.Add("SalesDocumentNumber_1C", "SalesDocumentNumber_1C");
                     bulkCopy.ColumnMappings.Add("SalesDocumentLineNo_1C", "SalesDocumentLineNo_1C");
@@ -353,11 +388,12 @@ SELECT @DateKey;";
                     bulkCopy.ColumnMappings.Add("CurrencyCode", "CurrencyCode");
 
                     await bulkCopy.WriteToServerAsync(table);
+                    _log.LogInformation("Successfully inserted {RowCount} rows into Analytics.FactSales.", table.Rows.Count);
                 }
             }
             catch (Exception ex)
             {
-                _log.LogError(ex, "Ошибка при вставке фактов продаж");
+                _log.LogError(ex, "Ошибка при пакетной вставке фактов продаж");
                 throw;
             }
         }
@@ -369,12 +405,17 @@ SELECT @DateKey;";
                 throw new ArgumentNullException(nameof(rows), "Коллекция строк платежей не может быть null");
             }
 
+            if (!rows.Any())
+            {
+                _log.LogInformation("InsertFactPaymentsAsync: No rows to insert.");
+                return;
+            }
+
             await using var conn = new SqlConnection(_connString);
             try
             {
                 await conn.OpenAsync();
 
-                // Создаем таблицу для пакетной вставки
                 var table = new DataTable();
                 table.Columns.Add("PaymentDocID_1C", typeof(Guid));
                 table.Columns.Add("PaymentNumber_1C", typeof(string));
@@ -399,13 +440,11 @@ SELECT @DateKey;";
                     table.Rows.Add(dataRow);
                 }
 
-                // Используем SqlBulkCopy для пакетной вставки
                 using (var bulkCopy = new SqlBulkCopy(conn))
                 {
                     bulkCopy.DestinationTableName = "Analytics.FactPayments";
-                    bulkCopy.BulkCopyTimeout = _commandTimeout;
+                    bulkCopy.BulkCopyTimeout = _commandTimeout; // Use the configured timeout
 
-                    // Настраиваем соответствие колонок
                     bulkCopy.ColumnMappings.Add("PaymentDocID_1C", "PaymentDocID_1C");
                     bulkCopy.ColumnMappings.Add("PaymentNumber_1C", "PaymentNumber_1C");
                     bulkCopy.ColumnMappings.Add("PaymentDateKey", "PaymentDateKey");
@@ -416,11 +455,12 @@ SELECT @DateKey;";
                     bulkCopy.ColumnMappings.Add("OrganizationSK", "OrganizationSK");
 
                     await bulkCopy.WriteToServerAsync(table);
+                    _log.LogInformation("Successfully inserted {RowCount} rows into Analytics.FactPayments.", table.Rows.Count);
                 }
             }
             catch (Exception ex)
             {
-                _log.LogError(ex, "Ошибка при вставке фактов платежей");
+                _log.LogError(ex, "Ошибка при пакетной вставке фактов платежей");
                 throw;
             }
         }

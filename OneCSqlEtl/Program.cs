@@ -4,13 +4,13 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
+// using Microsoft.Extensions.Options; // Not directly used here, but services.Configure<Settings> is
 using System.Runtime.Versioning;
-using static OneCSqlEtl.EtlOrchestrator;
+// using static OneCSqlEtl.EtlOrchestrator; // This was removed as unnecessary
 
 namespace OneCSqlEtl
 {
-    [SupportedOSPlatform("windows")] // Пометить класс или метод Main
+    [SupportedOSPlatform("windows")]
     internal class Program
     {
         static async Task Main(string[] args)
@@ -22,13 +22,11 @@ namespace OneCSqlEtl
                     {
                         cfg.SetBasePath(AppContext.BaseDirectory)
                            .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
-                           .AddEnvironmentVariables("ONECETL_"); // Добавляем переменные среды с префиксом ONECETL_
+                           .AddEnvironmentVariables("ONECETL_");
                     })
                     .ConfigureServices((ctx, services) =>
                     {
-                        // Привязываем настройки из appsettings.json
                         services.Configure<Settings>(ctx.Configuration);
-                        // Регистрируем наши сервисы
                         services.AddSingleton<OneCAccessor>();
                         services.AddSingleton<SqlRepository>();
                         services.AddSingleton<EtlOrchestrator>();
@@ -38,31 +36,35 @@ namespace OneCSqlEtl
                         logging.ClearProviders();
                         logging.AddConsole();
                         logging.AddDebug();
-                        logging.SetMinimumLevel(LogLevel.Information);
+                        // MODIFICATION HERE:
+                        logging.SetMinimumLevel(LogLevel.Debug); // Changed from LogLevel.Information
                     })
                     .Build();
 
-                // Запускаем ETL
                 var orchestrator = host.Services.GetRequiredService<EtlOrchestrator>();
                 await orchestrator.RunAsync();
 
-                // Если захотите, хост может ещё работать, но можно и выйти сразу 
-                // await host.RunAsync();
+                // Console.WriteLine("ETL Process completed. Press any key to exit."); // Optional
+                // Console.ReadKey();
             }
             catch (Exception ex)
             {
                 Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine($"Критическая ошибка: {ex.Message}");
+                Console.WriteLine($"Критическая ошибка в Main: {ex.Message}");
+                Console.WriteLine("--- StackTrace ---");
                 Console.WriteLine(ex.StackTrace);
 
-                if (ex.InnerException != null)
+                Exception? currentEx = ex.InnerException;
+                int innerCount = 1;
+                while (currentEx != null)
                 {
-                    Console.WriteLine($"Внутреннее исключение: {ex.InnerException.Message}");
-                    Console.WriteLine(ex.InnerException.StackTrace);
+                    Console.WriteLine($"--- Внутреннее исключение ({innerCount++}) ---");
+                    Console.WriteLine($"Сообщение: {currentEx.Message}");
+                    Console.WriteLine($"StackTrace: {currentEx.StackTrace}");
+                    currentEx = currentEx.InnerException;
                 }
-
                 Console.ResetColor();
-                Environment.ExitCode = 1; // Устанавливаем код ошибки для внешних систем
+                Environment.ExitCode = 1;
             }
         }
     }
