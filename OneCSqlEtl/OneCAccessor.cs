@@ -185,7 +185,7 @@ namespace OneCSqlEtl
                 q = _v8Application.NewObject("Query");
                 if (q == null)
                 {
-                    _log.LogError("Не удалось создать объект Query для Контрагентов (_v8Application.NewObject вернул null).");
+                    _log.LogError("Failed to create Query object for Customers (_v8Application.NewObject(\"Query\") returned null).");
                     yield break;
                 }
 
@@ -298,7 +298,11 @@ namespace OneCSqlEtl
             try
             {
                 q = _v8Application.NewObject("Query");
-                if (q == null) { _log.LogError("Не удалось создать объект Query для Номенклатуры."); yield break; }
+                if (q == null)
+                {
+                    _log.LogError("Failed to create Query object for Products (_v8Application.NewObject(\"Query\") returned null).");
+                    yield break;
+                }
                 try { q.Text = query; } catch (COMException ex) { _log.LogError(ex, "COMException текст запроса Номенклатуры."); yield break; } catch (Exception ex) { _log.LogError(ex, "Ошибка текст запроса Номенклатуры."); yield break; }
                 try { executionResult = q.Execute(); } catch (COMException ex) { _log.LogError(ex, "COMException запрос Номенклатуры."); yield break; } catch (Exception ex) { _log.LogError(ex, "Ошибка запрос Номенклатуры."); yield break; }
                 if (executionResult == null) { _log.LogWarning("Query.Execute null для Номенклатуры."); yield break; }
@@ -345,7 +349,11 @@ namespace OneCSqlEtl
             try
             {
                 q = _v8Application.NewObject("Query");
-                if (q == null) { _log.LogError("Не удалось создать объект Query для Договоров."); yield break; }
+                if (q == null)
+                {
+                    _log.LogError("Failed to create Query object for Contracts (_v8Application.NewObject(\"Query\") returned null).");
+                    yield break;
+                }
                 try { q.Text = query; } catch (COMException ex) { _log.LogError(ex, "COMException текст запроса Договоров."); yield break; } catch (Exception ex) { _log.LogError(ex, "Ошибка текст запроса Договоров."); yield break; }
                 try { executionResult = q.Execute(); } catch (COMException ex) { _log.LogError(ex, "COMException запрос Договоров."); yield break; } catch (Exception ex) { _log.LogError(ex, "Ошибка запрос Договоров."); yield break; }
                 if (executionResult == null) { _log.LogWarning("Query.Execute null для Договоров."); yield break; }
@@ -391,7 +399,11 @@ namespace OneCSqlEtl
             try
             {
                 q = _v8Application.NewObject("Query");
-                if (q == null) { _log.LogError("Не удалось создать объект Query для Организаций."); yield break; }
+                if (q == null)
+                {
+                    _log.LogError("Failed to create Query object for Organizations (_v8Application.NewObject(\"Query\") returned null).");
+                    yield break;
+                }
                 try { q.Text = query; } catch (COMException ex) { _log.LogError(ex, "COMException текст запроса Организаций."); yield break; } catch (Exception ex) { _log.LogError(ex, "Ошибка текст запроса Организаций."); yield break; }
                 try { executionResult = q.Execute(); } catch (COMException ex) { _log.LogError(ex, "COMException запрос Организаций."); yield break; } catch (Exception ex) { _log.LogError(ex, "Ошибка запрос Организаций."); yield break; }
                 if (executionResult == null) { _log.LogWarning("Query.Execute null для Организаций."); yield break; }
@@ -433,7 +445,11 @@ namespace OneCSqlEtl
             try
             {
                 q = _v8Application.NewObject("Query");
-                if (q == null) { _log.LogError("Не удалось создать объект Query для Строк Продаж."); yield break; }
+                if (q == null)
+                {
+                    _log.LogError("Failed to create Query object for Sale Rows (_v8Application.NewObject(\"Query\") returned null).");
+                    yield break;
+                }
                 try { q.Text = query; } catch (COMException ex) { _log.LogError(ex, "COMException текст запроса Строк Продаж."); yield break; } catch (Exception ex) { _log.LogError(ex, "Ошибка текст запроса Строк Продаж."); yield break; }
                 try { executionResult = q.Execute(); } catch (COMException ex) { _log.LogError(ex, "COMException запрос Строк Продаж."); yield break; } catch (Exception ex) { _log.LogError(ex, "Ошибка запрос Строк Продаж."); yield break; }
                 if (executionResult == null) { _log.LogWarning("Query.Execute null для Строк Продаж."); yield break; }
@@ -504,7 +520,11 @@ namespace OneCSqlEtl
             try
             {
                 q = _v8Application.NewObject("Query");
-                if (q == null) { _log.LogError("Не удалось создать объект Query для Строк Платежей."); yield break; }
+                if (q == null)
+                {
+                    _log.LogError("Failed to create Query object for Payment Rows (_v8Application.NewObject(\"Query\") returned null).");
+                    yield break;
+                }
                 try { q.Text = query; } catch (COMException ex) { _log.LogError(ex, "COMException текст запроса Строк Платежей."); yield break; } catch (Exception ex) { _log.LogError(ex, "Ошибка текст запроса Строк Платежей."); yield break; }
                 try { executionResult = q.Execute(); } catch (COMException ex) { _log.LogError(ex, "COMException запрос Строк Платежей."); yield break; } catch (Exception ex) { _log.LogError(ex, "Ошибка запрос Строк Платежей."); yield break; }
                 if (executionResult == null) { _log.LogWarning("Query.Execute null для Строк Платежей."); yield break; }
