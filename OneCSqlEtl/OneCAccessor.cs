@@ -95,8 +95,7 @@ namespace OneCSqlEtl
                 else if (connectResult != null && Marshal.IsComObject(connectResult)) // Сценарий 2: Connect() вернул COM-объект (объект соединения)
                 {
                     _log.LogInformation("_v8Application.Connect() returned a COM object (connection object). Type: {ContextType}. _v8Application will be used for NewObject.", (object)(connectResult?.GetType().ToString() ?? "null"));
-                    // Здесь важно: даже если вернулся объект соединения, для NewObject мы все равно будем использовать _v8Application.
-                    // Сохраненный connectResult (если это объект соединения) мог бы использоваться для явного Disconnect этой сессии, но ReleaseComObjects(_v8Application) должен закрыть все.
+                    _v8Application = connectResult;
                     isConnectionSuccessful = true;
                     // Если бы объект соединения был нужен, можно было бы его сохранить:
                     // _connectionObject = connectResult; 
