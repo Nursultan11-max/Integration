@@ -278,15 +278,7 @@ namespace OneCSqlEtl
             catch (Microsoft.CSharp.RuntimeBinder.RuntimeBinderException rbEx)
             { logger.LogWarning(rbEx, "[GetSafeDynamicValue] RuntimeBinderException: Property '{Property}' not found or type mismatch for {Context}.", propertyName, contextMessage); return null; }
             catch (Exception ex)
-            {
-                // Avoid accessing the dynamic property again here as it may
-                // throw the same exception that triggered this catch block.
-                logger.LogWarning(ex,
-                    "[GetSafeDynamicValue] Exception converting/accessing property '{Property}' for {Context}.",
-                    propertyName,
-                    contextMessage);
-                return null;
-            }
+            { logger.LogWarning(ex, "[GetSafeDynamicValue] Exception converting/accessing property '{Property}' for {Context}. Value was: {PropValue}", propertyName, contextMessage, (object?)comObject[propertyName]?.ToString() ?? "null"); return null; } // Cast for logger
         }
 
         public IEnumerable<Customer1C> GetCustomers()
